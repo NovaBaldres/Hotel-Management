@@ -2,188 +2,235 @@ const Booking = require('../models/Booking');
 const Room = require('../models/Room');
 const Guest = require('../models/Guest');
 
-exports.getBookings = async (req, res, next) => {
+const getBookings = async (req, res) => {
     try {
-        // Extract pagination parameters (page & limit) from query string, or use defaults
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 10;
-        const skip = (page - 1) * limit;
-
-        // Filter setup: allows filtering bookings by 'status'
-        const filter = {};
-        if (req.query.status) filter.status = req.query.status;
-
-        // Fetch bookings from DB with guest & room details populated
-        const bookings = await Booking.find(filter)
-        .populate('guestId', 'name email phone') // populate guest fields
-        .populate('roomId', 'number type price') // populate room fields
-        .limit(limit)                            // limit per page
-        .skip(skip)                              // skip previous pages
-        .sort({ checkIn: -1 });                  // sort newest check-ins first
-
-        // Count total number of bookings for pagination metadata
-        const total = await Booking.countDocuments(filter);
-
-        // Send response with pagination info
-        res.status(200).json({
-        success: true,
-        count: bookings.length,
-        total,
-        page,
-        pages: Math.ceil(total / limit),
-        data: bookings
+        const { page = 1, limit = 10, status, guestId, startDate, endDate } = req.query;
+        
+        const query = {};
+        if (status) query.status = status;
+        if (guestId) query.guestId = guestId;
+        
+        if (startDate || endDate) {
+            query.checkIn = {};
+            if (startDate) query.checkIn.$gte = new Date(startDate);
+            if (endDate) query.checkIn.$lte = new Date(endDate);
+        }
+        
+        const bookings = await Booking.find(query)
+            .populate('guestId', 'name email phone')
+            .populate('roomId', 'number type price')
+            .limit(limit * 1)
+            .skip((page - 1) * limit)
+            .sort({ checkIn: 1 });
+        
+        const total = await Booking.countDocuments(query);
+        
+        res.json({
+            success: true,
+            count: bookings.length,
+            total,
+            totalPages: Math.ceil(total / limit),
+            currentPage: page,
+            data: bookings
         });
     } catch (error) {
-        next(error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
     }
-    };
+};
 
-    exports.getBooking = async (req, res, next) => {
+const getBooking = async (req, res) => {
     try {
-        const booking = await Booking.findById(req.params.id).populate('guestId').populate('roomId');
+        const booking = await Booking.findById(req.params.id)
+            .populate('guestId', 'name email phone')
+            .populate('roomId', 'number type price');
+        
         if (!booking) {
-        return res.status(404).json({ success: false, message: 'Booking not found' });
+            return res.status(404).json({ 
+                success: false, 
+                error: 'Booking not found' 
+            });
         }
-        res.status(200).json({ success: true, data: booking });
-    } catch (error) {
-        next(error);
-    }
-    };
-
-    // CreateBooking function
-    exports.createBooking = async (req, res, next) => {
-    try {
-        const { guestId, roomId, checkIn, checkOut } = req.body;
-
-        // Verify guest exists
-        const guest = await Guest.findById(guestId);
-        if (!guest) {
-        return res.status(404).json({
-            success: false,
-            message: 'Guest not found'
+        
+        res.json({ 
+            success: true, 
+            data: booking 
         });
-        }
+    } catch (error) {
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
+};
 
-        // Verify room exists
-        const room = await Room.findById(roomId);
+const createBooking = async (req, res) => {
+    try {
+        // Check if room exists and is available
+        const room = await Room.findById(req.body.roomId);
         if (!room) {
-        return res.status(404).json({
-            success: false,
-            message: 'Room not found'
-        });
+            return res.status(404).json({ 
+                success: false, 
+                error: 'Room not found' 
+            });
         }
-
-        // Check if room is in maintenance
-        if (room.status === 'maintenance') {
-        return res.status(400).json({
-            success: false,
-            message: 'Room is currently under maintenance and cannot be booked'
-        });
+        
+        if (room.status !== 'available') {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Room is not available' 
+            });
         }
-
-        // Validate dates
-        const checkInDate = new Date(checkIn);
-        const checkOutDate = new Date(checkOut);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        if (checkInDate < today) {
-        return res.status(400).json({
-            success: false,
-            message: 'Check-in date cannot be in the past'
-        });
+        
+        // Check if guest exists
+        const guest = await Guest.findById(req.body.guestId);
+        if (!guest) {
+            return res.status(404).json({ 
+                success: false, 
+                error: 'Guest not found' 
+            });
         }
-
-        if (checkOutDate <= checkInDate) {
-        return res.status(400).json({
-            success: false,
-            message: 'Check-out date must be after check-in date'
+        
+        // Check for overlapping bookings
+        const overlappingBooking = await Booking.findOne({
+            roomId: req.body.roomId,
+            $or: [
+                {
+                    checkIn: { $lt: new Date(req.body.checkOut) },
+                    checkOut: { $gt: new Date(req.body.checkIn) }
+                }
+            ],
+            status: { $in: ['confirmed', 'checked-in'] }
         });
+        
+        if (overlappingBooking) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Room is already booked for these dates' 
+            });
         }
-
-        // Check room availability (prevent double-booking)
-        const conflictingBooking = await Booking.findOne({
-        roomId,
-        status: { $in: ['pending', 'confirmed', 'checked-in'] },
-        $or: [
-            { 
-            checkIn: { $lte: checkOutDate }, 
-            checkOut: { $gte: checkInDate } 
-            }
-        ]
-        });
-
-        if (conflictingBooking) {
-        return res.status(400).json({
-            success: false,
-            message: 'Room is not available for the selected dates',
-            conflictingBooking: {
-            checkIn: conflictingBooking.checkIn,
-            checkOut: conflictingBooking.checkOut
-            }
-        });
-        }
-
-        // Calculate total price
-        const days = Math.ceil((checkOutDate - checkInDate) / (1000 * 60 * 60 * 24));
-        const totalPrice = days * room.price;
-
-        // Create booking
-        const booking = await Booking.create({
-        ...req.body,
-        totalPrice
-        });
-
-        // Update room status to occupied (only if check-in is today or already started)
-        if (checkInDate <= today) {
-        await Room.findByIdAndUpdate(roomId, { status: 'occupied' });
-        }
-
+        
+        const booking = await Booking.create(req.body);
+        
+        // Update room status
+        room.status = 'occupied';
+        await room.save();
+        
         const populatedBooking = await Booking.findById(booking._id)
-        .populate('guestId')
-        .populate('roomId');
-
-        res.status(201).json({
-        success: true,
-        message: `Booking created successfully. Total: $${totalPrice} for ${days} night(s)`,
-        data: populatedBooking
+            .populate('guestId', 'name email phone')
+            .populate('roomId', 'number type price');
+        
+        res.status(201).json({ 
+            success: true, 
+            data: populatedBooking 
         });
     } catch (error) {
-        next(error);
+        if (error.name === 'ValidationError') {
+            const messages = Object.values(error.errors).map(val => val.message);
+            return res.status(400).json({ 
+                success: false, 
+                error: messages 
+            });
+        }
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
     }
-    };
+};
 
-
-    exports.updateBooking = async (req, res, next) => {
+const updateBooking = async (req, res) => {
     try {
-        const booking = await Booking.findByIdAndUpdate(req.params.id, req.body, {
-        new: true,
-        runValidators: true
-        }).populate('guestId').populate('roomId');
-
+        const booking = await Booking.findByIdAndUpdate(
+            req.params.id,
+            req.body,
+            { new: true, runValidators: true }
+        ).populate('guestId', 'name email phone')
+         .populate('roomId', 'number type price');
+        
         if (!booking) {
-        return res.status(404).json({ success: false, message: 'Booking not found' });
+            return res.status(404).json({ 
+                success: false, 
+                error: 'Booking not found' 
+            });
         }
-
-        if (req.body.status === 'checked-out') {
-        await Room.findByIdAndUpdate(booking.roomId._id, { status: 'available' });
-        }
-
-        res.status(200).json({ success: true, data: booking });
+        
+        res.json({ 
+            success: true, 
+            data: booking 
+        });
     } catch (error) {
-        next(error);
+        if (error.name === 'ValidationError') {
+            const messages = Object.values(error.errors).map(val => val.message);
+            return res.status(400).json({ 
+                success: false, 
+                error: messages 
+            });
+        }
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
     }
-    };
+};
 
-    exports.deleteBooking = async (req, res, next) => {
+const deleteBooking = async (req, res) => {
     try {
-        const booking = await Booking.findByIdAndDelete(req.params.id);
+        const booking = await Booking.findById(req.params.id);
+        
         if (!booking) {
-        return res.status(404).json({ success: false, message: 'Booking not found' });
+            return res.status(404).json({ 
+                success: false, 
+                error: 'Booking not found' 
+            });
         }
-        await Room.findByIdAndUpdate(booking.roomId, { status: 'available' });
-        res.status(200).json({ success: true, message: 'Booking deleted successfully', data: {} });
+        
+        // Update room status back to available if booking is active
+        if (booking.status === 'confirmed' || booking.status === 'checked-in') {
+            await Room.findByIdAndUpdate(booking.roomId, { status: 'available' });
+        }
+        
+        await booking.deleteOne();
+        
+        res.json({ 
+            success: true, 
+            message: 'Booking deleted successfully' 
+        });
     } catch (error) {
-        next(error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
     }
+};
+
+// Get bookings by guest ID
+const getGuestBookings = async (req, res) => {
+    try {
+        const bookings = await Booking.find({ guestId: req.params.guestId })
+            .populate('roomId', 'number type price')
+            .sort({ createdAt: -1 });
+        
+        res.json({ 
+            success: true, 
+            count: bookings.length,
+            data: bookings 
+        });
+    } catch (error) {
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
+};
+
+module.exports = {
+    getBookings,
+    getBooking,
+    createBooking,
+    updateBooking,
+    deleteBooking,
+    getGuestBookings
 };
