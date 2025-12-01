@@ -10,8 +10,7 @@ const roomSchema = new mongoose.Schema({
     type: {
         type: String,
         required: [true, 'Room type is required'],
-        enum: ['single', 'double', 'suite', 'deluxe'],
-        lowercase: true
+        enum: ['single', 'double', 'suite', 'deluxe']
     },
     price: {
         type: Number,
@@ -21,19 +20,15 @@ const roomSchema = new mongoose.Schema({
     status: {
         type: String,
         enum: ['available', 'occupied', 'maintenance'],
-        default: 'available',
-        lowercase: true
+        default: 'available'
     },
-    amenities: {
-        type: [String],
-        default: []
-    },
+    amenities: [String],
     capacity: {
         type: Number,
-        default: 1,
+        required: true,
         min: 1
     }
-    }, {
+}, {
     timestamps: true
 });
 
