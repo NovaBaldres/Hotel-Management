@@ -19,28 +19,44 @@ const bookingSchema = new mongoose.Schema({
         type: Date,
         required: [true, 'Check-out date is required'],
         validate: {
-        validator: function(value) {
-            return value > this.checkIn;
-        },
-        message: 'Check-out date must be after check-in date'
+            validator: function(value) {
+                return value > this.checkIn;
+            },
+            message: 'Check-out date must be after check-in date'
         }
     },
     status: {
         type: String,
-        enum: ['pending', 'confirmed', 'checked-in', 'checked-out', 'cancelled'],
-        default: 'pending',
-        lowercase: true
+        enum: ['confirmed', 'checked-in', 'checked-out', 'cancelled'],
+        default: 'confirmed'
     },
-    totalPrice: {
+    totalAmount: {
         type: Number,
+        required: true,
         min: 0
     },
-    notes: {
+    paymentStatus: {
         type: String,
-        trim: true
-    }
-    }, {
+        enum: ['pending', 'paid', 'refunded'],
+        default: 'pending'
+    },
+    specialRequests: String
+}, {
     timestamps: true
+});
+
+// Middleware to calculate total amount
+bookingSchema.pre('save', async function(next) {
+    if (this.isModified('roomId') || this.isModified('checkIn') || this.isModified('checkOut')) {
+        const Room = mongoose.model('Room');
+        const room = await Room.findById(this.roomId);
+        
+        if (room) {
+            const days = Math.ceil((this.checkOut - this.checkIn) / (1000 * 60 * 60 * 24));
+            this.totalAmount = room.price * days;
+        }
+    }
+    next();
 });
 
 module.exports = mongoose.model('Booking', bookingSchema);
