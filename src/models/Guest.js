@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const guestSchema = new mongoose.Schema({
     name: {
         type: String,
-        required: [true, 'Guest name is required'],
+        required: [true, 'Name is required'],
         trim: true
     },
     email: {
@@ -11,8 +11,7 @@ const guestSchema = new mongoose.Schema({
         required: [true, 'Email is required'],
         unique: true,
         lowercase: true,
-        trim: true,
-        match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email']
+        trim: true
     },
     phone: {
         type: String,
@@ -20,14 +19,20 @@ const guestSchema = new mongoose.Schema({
         trim: true
     },
     address: {
-        type: String,
-        trim: true
+        street: String,
+        city: String,
+        state: String,
+        country: String,
+        zipCode: String
     },
-    idNumber: {
-        type: String,
-        trim: true
+    idProof: {
+        type: {
+            type: String,
+            enum: ['passport', 'driver-license', 'national-id']
+        },
+        number: String
     }
-    }, {
+}, {
     timestamps: true
 });
 
