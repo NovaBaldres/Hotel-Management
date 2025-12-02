@@ -2,7 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
 const dotenv = require("dotenv");
-const connectDB = require("./config/database");
+const connectDB = require("../config/database");
 
 dotenv.config();
 connectDB();
@@ -19,5 +19,6 @@ app.use("/api/bookings", require("./routes/bookingRoutes"));
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
 
 
