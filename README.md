@@ -1,3 +1,5 @@
+## BASE URL = https://hotel-management-9-egfa.onrender.com
+
 # Hotel-Management
 h1>Hotel Management API</h1>
 
