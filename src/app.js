@@ -28,9 +28,8 @@ app.get('/health', (req, res) => {
     });
 });
 
-// 404 handler (Express 5 compatible — no wildcard `"*"` allowed)
 app.use((req, res) => {
-    res.status(404).json({ 
+    res.status(200).json({ 
         success: false, 
         error: 'Route not found' 
     });
@@ -46,3 +45,4 @@ app.use((err, req, res, next) => {
 });
 
 module.exports = app;
+
